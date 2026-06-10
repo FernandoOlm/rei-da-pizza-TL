@@ -49,7 +49,7 @@ async def start_or_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     msg = (
-        f"🍕 **Painel Financeiro - Rei da Pizza**\n"
+        f"🍕 *Painel Financeiro - Rei da Pizza*\n"
         f"ID: `{user_id}`\n\n"
         f"Selecione uma opção abaixo:"
     )
@@ -71,7 +71,7 @@ async def menu_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="back_to_menu")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text("📈 **Relatórios Disponíveis**\nSelecione o tipo de resumo:", reply_markup=reply_markup, parse_mode="Markdown")
+    await query.edit_message_text("📈 *Relatórios Disponíveis*\nSelecione o tipo de resumo:", reply_markup=reply_markup, parse_mode="Markdown")
 
 async def report_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -93,7 +93,7 @@ async def report_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
             data = response.json()["data"]
             msg = (
-                f"📊 **Resumo Geral (Em Aberto)**\n\n"
+                f"📊 *Resumo Geral (Em Aberto)*\n\n"
                 f"🔴 A Pagar: R$ {data['total_payable_pending']:.2f} "
                 f"(Atrasado: R$ {data['overdue_payable']:.2f})\n"
                 f"🟢 A Receber: R$ {data['total_receivable_pending']:.2f} "
@@ -106,7 +106,7 @@ async def report_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
     elif action in ["report_month", "report_week"]:
         msg = (
-            "🚧 **Recurso em Construção no Lovable**\n\n"
+            "🚧 *Recurso em Construção no Lovable*\n\n"
             "Atualmente, a API suporta apenas o Resumo Geral de tudo que está pendente.\n"
             "Um endpoint para Fluxo de Caixa Mensal/Semanal precisa ser criado no seu painel web."
         )
@@ -123,7 +123,7 @@ async def start_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     tipo_nome = "fornecedor" if action == "start_payable" else "cliente"
     
-    await query.edit_message_text(f"📝 Qual é o nome do **{tipo_nome}**?\n*(Digite no chat ou envie /cancelar para desistir)*", parse_mode="Markdown")
+    await query.edit_message_text(f"📝 Qual é o nome do *{tipo_nome}*?\n_(Digite no chat ou envie /cancelar para desistir)_", parse_mode="Markdown")
     return ASK_NAME
 
 async def ask_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -134,7 +134,7 @@ async def ask_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
         
     context.user_data['name'] = text
-    await update.message.reply_text("💰 Qual o **valor**?\n*(Exemplo: 250.50)*\n\n*(Ou envie /cancelar)*", parse_mode="Markdown")
+    await update.message.reply_text("💰 Qual o *valor*?\n_(Exemplo: 250.50)_\n\n_(Ou envie /cancelar)_", parse_mode="Markdown")
     return ASK_AMOUNT
 
 async def ask_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -168,7 +168,7 @@ async def ask_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text("📅 Selecione a **data de vencimento** nos botões abaixo ou digite no formato AAAA-MM-DD:", reply_markup=reply_markup, parse_mode="Markdown")
+    await update.message.reply_text("📅 Selecione a *data de vencimento* nos botões abaixo ou digite no formato AAAA-MM-DD:", reply_markup=reply_markup, parse_mode="Markdown")
     return ASK_DATE
 
 async def process_transaction_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -203,10 +203,10 @@ async def process_transaction_date(update: Update, context: ContextTypes.DEFAULT
     
     if action_type == "start_payable":
         payload["supplier"] = name
-        success_msg = f"✅ **Despesa registrada!**\nFornecedor: {name}\nValor: R$ {amount:.2f}\nVencimento: {vencimento}"
+        success_msg = f"✅ *Despesa registrada!*\nFornecedor: {name}\nValor: R$ {amount:.2f}\nVencimento: {vencimento}"
     else:
         payload["customer"] = name
-        success_msg = f"✅ **Receita registrada!**\nCliente: {name}\nValor: R$ {amount:.2f}\nVencimento: {vencimento}"
+        success_msg = f"✅ *Receita registrada!*\nCliente: {name}\nValor: R$ {amount:.2f}\nVencimento: {vencimento}"
 
     try:
         response = requests.post(
@@ -219,9 +219,9 @@ async def process_transaction_date(update: Update, context: ContextTypes.DEFAULT
             await msg_func(success_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         else:
             err = response.json().get("error", "Erro da API")
-            await msg_func(f"❌ **Erro na API**: {err}", parse_mode="Markdown")
+            await msg_func(f"❌ *Erro na API*: {err}", parse_mode="Markdown")
     except Exception as e:
-        await msg_func(f"❌ **Erro de Comunicação**: {e}", parse_mode="Markdown")
+        await msg_func(f"❌ *Erro de Comunicação*: {e}", parse_mode="Markdown")
 
     return ConversationHandler.END
 
