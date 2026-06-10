@@ -17,7 +17,7 @@ from telegram.ext import (
 load_dotenv()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:5173")
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:5173").rstrip("/")
 REI_DA_PIZZA_API_TOKEN = os.getenv("REI_DA_PIZZA_API_TOKEN")
 
 logging.basicConfig(
@@ -32,6 +32,7 @@ ASK_NAME, ASK_AMOUNT, ASK_DATE, ASK_CATEGORY, ASK_COST_CENTER = range(5)
 def build_headers():
     return {
         "Authorization": f"Bearer {REI_DA_PIZZA_API_TOKEN}",
+        "X-Telegram-Api-Token": REI_DA_PIZZA_API_TOKEN,
         "Content-Type": "application/json"
     }
 
@@ -215,18 +216,46 @@ async def process_transaction_date(update: Update, context: ContextTypes.DEFAULT
     
     action_type = context.user_data['action_type']
     
-    keyboard = [
-        [InlineKeyboardButton("⏭️ Pular Categoria", callback_data="skip_category")]
-    ]
+    keyboard = []
+    
+    try:
+        cat_resp = requests.get(
+            f"{API_BASE_URL}/api/public/telegram/categories",
+            headers=build_headers(),
+            params={"telegram_user_id": user_id}
+        )
+        if cat_resp.ok:
+            categories = cat_resp.json().get("data", [])
+            # Organiza 2 botões por linha
+            row = []
+            for cat in categories:
+                cat_name = cat.get("name")
+                if cat_name:
+                    # Usamos um prefixo 'cat_' e truncamos para caber no callback_data
+                    row.append(InlineKeyboardButton(cat_name, callback_data=f"cat_{cat_name[:40]}"))
+                    if len(row) == 2:
+                        keyboard.append(row)
+                        row = []
+            if row:
+                keyboard.append(row)
+    except Exception as e:
+        logger.warning(f"Erro ao buscar categorias: {e}")
+
+    keyboard.append([InlineKeyboardButton("⏭️ Pular Categoria", callback_data="skip_category")])
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await msg_func("📂 Qual a *Categoria* dessa transação? (ex: Alimentação, Transporte)\n_(Ou clique em pular)_", reply_markup=reply_markup, parse_mode="Markdown")
+    await msg_func("📂 Qual a *Categoria* dessa transação? (Selecione abaixo ou digite o nome)\n_(Ou clique em pular)_", reply_markup=reply_markup, parse_mode="Markdown")
     return ASK_CATEGORY
 
 async def ask_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query:
         await update.callback_query.answer()
-        context.user_data['category'] = None
+        data = update.callback_query.data
+        if data == "skip_category":
+            context.user_data['category'] = None
+        else:
+            context.user_data['category'] = data.replace("cat_", "", 1)
+        user_id = update.effective_user.id
         msg_func = update.callback_query.edit_message_text
     else:
         text = update.message.text
@@ -235,20 +264,46 @@ async def ask_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await start_or_menu(update, context)
             return ConversationHandler.END
         context.user_data['category'] = text
+        user_id = update.effective_user.id
         msg_func = update.message.reply_text
         
-    keyboard = [
-        [InlineKeyboardButton("⏭️ Pular Centro de Custo", callback_data="skip_cost_center")]
-    ]
+    keyboard = []
+    
+    try:
+        cc_resp = requests.get(
+            f"{API_BASE_URL}/api/public/telegram/cost_centers",
+            headers=build_headers(),
+            params={"telegram_user_id": user_id}
+        )
+        if cc_resp.ok:
+            cost_centers = cc_resp.json().get("data", [])
+            row = []
+            for cc in cost_centers:
+                cc_name = cc.get("name")
+                if cc_name:
+                    row.append(InlineKeyboardButton(cc_name, callback_data=f"cc_{cc_name[:40]}"))
+                    if len(row) == 2:
+                        keyboard.append(row)
+                        row = []
+            if row:
+                keyboard.append(row)
+    except Exception as e:
+        logger.warning(f"Erro ao buscar centros de custo: {e}")
+
+    keyboard.append([InlineKeyboardButton("⏭️ Pular Centro de Custo", callback_data="skip_cost_center")])
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await msg_func("🏢 Qual o *Centro de Custo*? (ex: Loja 1, Matriz)\n_(Ou clique em pular)_", reply_markup=reply_markup, parse_mode="Markdown")
+    await msg_func("🏢 Qual o *Centro de Custo*? (Selecione abaixo ou digite o nome)\n_(Ou clique em pular)_", reply_markup=reply_markup, parse_mode="Markdown")
     return ASK_COST_CENTER
 
 async def process_transaction_final(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query:
         await update.callback_query.answer()
-        context.user_data['cost_center'] = None
+        data = update.callback_query.data
+        if data == "skip_cost_center":
+            context.user_data['cost_center'] = None
+        else:
+            context.user_data['cost_center'] = data.replace("cc_", "", 1)
         msg_func = update.callback_query.edit_message_text
         user_id = update.effective_user.id
     else:
@@ -347,11 +402,11 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, process_transaction_date)
             ],
             ASK_CATEGORY: [
-                CallbackQueryHandler(ask_category, pattern="^skip_category$"),
+                CallbackQueryHandler(ask_category, pattern="^(skip_category|cat_.*)$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, ask_category)
             ],
             ASK_COST_CENTER: [
-                CallbackQueryHandler(process_transaction_final, pattern="^skip_cost_center$"),
+                CallbackQueryHandler(process_transaction_final, pattern="^(skip_cost_center|cc_.*)$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, process_transaction_final)
             ],
         },
