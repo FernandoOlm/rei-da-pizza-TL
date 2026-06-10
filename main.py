@@ -24,6 +24,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
+logger = logging.getLogger(__name__)
 
 # Estados da conversa
 ASK_NAME, ASK_AMOUNT, ASK_DATE = range(3)
@@ -54,6 +55,8 @@ async def start_or_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Selecione uma opção abaixo:"
     )
     
+    logger.info(f"Usuário {user_id} acessou o menu principal.")
+    
     if update.message:
         await update.message.reply_text(msg, reply_markup=reply_markup, parse_mode="Markdown")
     else:
@@ -81,14 +84,19 @@ async def report_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
     if action == "report_summary":
+        logger.info(f"Usuário {user_id} solicitou Resumo Geral. Fazendo GET para {API_BASE_URL}/api/public/telegram/summary")
         try:
             response = requests.get(
                 f"{API_BASE_URL}/api/public/telegram/summary",
                 headers=build_headers(),
                 params={"telegram_user_id": user_id}
             )
+            logger.info(f"API retornou status {response.status_code} para Resumo Geral.")
+            
             if not response.ok:
-                await query.edit_message_text(f"❌ Erro ao consultar a API. Confirme no Lovable se as rotas de servidor estão rodando.")
+                err_text = response.text[:200]
+                logger.error(f"Erro na API (Resumo Geral): {err_text}")
+                await query.edit_message_text(f"❌ Erro API ({response.status_code}): {err_text}")
                 return
                 
             data = response.json()["data"]
@@ -102,9 +110,11 @@ async def report_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = [[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="back_to_menu")]]
             await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         except Exception as e:
+            logger.error(f"Falha de comunicação no Resumo Geral: {e}", exc_info=True)
             await query.edit_message_text(f"❌ Falha de comunicação: {e}")
             
     elif action in ["report_month", "report_week"]:
+        logger.info(f"Usuário {user_id} clicou em relatório indisponível: {action}")
         msg = (
             "🚧 *Recurso em Construção no Lovable*\n\n"
             "Atualmente, a API suporta apenas o Resumo Geral de tudo que está pendente.\n"
@@ -123,23 +133,27 @@ async def start_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     tipo_nome = "fornecedor" if action == "start_payable" else "cliente"
     
+    logger.info(f"Usuário iniciou fluxo de transação: {action}. Perguntando nome do {tipo_nome}.")
     await query.edit_message_text(f"📝 Qual é o nome do *{tipo_nome}*?\n_(Digite no chat ou envie /cancelar para desistir)_", parse_mode="Markdown")
     return ASK_NAME
 
 async def ask_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if text == "/cancelar":
+        logger.info("Usuário cancelou no passo ASK_NAME.")
         await update.message.reply_text("Operação cancelada.")
         await start_or_menu(update, context)
         return ConversationHandler.END
         
     context.user_data['name'] = text
+    logger.info(f"Nome recebido: {text}. Perguntando valor.")
     await update.message.reply_text("💰 Qual o *valor*?\n_(Exemplo: 250.50)_\n\n_(Ou envie /cancelar)_", parse_mode="Markdown")
     return ASK_AMOUNT
 
 async def ask_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if text == "/cancelar":
+        logger.info("Usuário cancelou no passo ASK_AMOUNT.")
         await update.message.reply_text("Operação cancelada.")
         await start_or_menu(update, context)
         return ConversationHandler.END
@@ -148,28 +162,37 @@ async def ask_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         valor = float(text)
     except ValueError:
+        logger.warning(f"Usuário enviou valor inválido: {text}")
         await update.message.reply_text("❌ Valor inválido. Por favor, digite apenas números, usando ponto ou vírgula (Ex: 100.50).")
         return ASK_AMOUNT
         
-    context.user_data['amount'] = valor
-    
-    hoje = datetime.now()
-    amanha = hoje + timedelta(days=1)
-    semana_q_vem = hoje + timedelta(days=7)
-    
-    keyboard = [
-        [
-            InlineKeyboardButton(f"Hoje ({hoje.strftime('%d/%m')})", callback_data=hoje.strftime("%Y-%m-%d")),
-            InlineKeyboardButton(f"Amanhã ({amanha.strftime('%d/%m')})", callback_data=amanha.strftime("%Y-%m-%d")),
-        ],
-        [
-            InlineKeyboardButton(f"Daqui a 7 dias ({semana_q_vem.strftime('%d/%m')})", callback_data=semana_q_vem.strftime("%Y-%m-%d"))
+    try:
+        context.user_data['amount'] = valor
+        logger.info(f"Valor recebido: {valor}. Perguntando data.")
+        
+        hoje = datetime.now()
+        amanha = hoje + timedelta(days=1)
+        semana_q_vem = hoje + timedelta(days=7)
+        
+        keyboard = [
+            [
+                InlineKeyboardButton(f"Hoje ({hoje.strftime('%d/%m')})", callback_data=hoje.strftime("%Y-%m-%d")),
+                InlineKeyboardButton(f"Amanhã ({amanha.strftime('%d/%m')})", callback_data=amanha.strftime("%Y-%m-%d")),
+            ],
+            [
+                InlineKeyboardButton(f"Daqui a 7 dias ({semana_q_vem.strftime('%d/%m')})", callback_data=semana_q_vem.strftime("%Y-%m-%d"))
+            ]
         ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text("📅 Selecione a *data de vencimento* nos botões abaixo ou digite no formato AAAA-MM-DD:", reply_markup=reply_markup, parse_mode="Markdown")
-    return ASK_DATE
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text("📅 Selecione a *data de vencimento* nos botões abaixo ou digite no formato AAAA-MM-DD:", reply_markup=reply_markup, parse_mode="Markdown")
+        return ASK_DATE
+    except Exception as e:
+        import traceback
+        err_msg = f"❌ CRITICAL ERROR in ask_amount:\n{e}\n{traceback.format_exc()}"
+        logger.error(err_msg)
+        await update.message.reply_text(err_msg)
+        return ConversationHandler.END
 
 async def process_transaction_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Pode vir de um clique no botão ou texto digitado
@@ -208,19 +231,26 @@ async def process_transaction_date(update: Update, context: ContextTypes.DEFAULT
         payload["customer"] = name
         success_msg = f"✅ *Receita registrada!*\nCliente: {name}\nValor: R$ {amount:.2f}\nVencimento: {vencimento}"
 
+    logger.info(f"Enviando POST para {API_BASE_URL}/api/public/telegram/{endpoint} com payload: {payload}")
+
     try:
         response = requests.post(
             f"{API_BASE_URL}/api/public/telegram/{endpoint}",
             headers=build_headers(),
             json=payload
         )
+        logger.info(f"API retornou status {response.status_code} para registro de transação.")
+        
         if response.ok:
             keyboard = [[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="back_to_menu")]]
             await msg_func(success_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+            logger.info("Transação finalizada com sucesso.")
         else:
-            err = response.json().get("error", "Erro da API")
+            err = response.text[:200]
+            logger.error(f"Erro retornado pela API: {err}")
             await msg_func(f"❌ *Erro na API*: {err}", parse_mode="Markdown")
     except Exception as e:
+        logger.error(f"Erro de Comunicação na transação: {e}", exc_info=True)
         await msg_func(f"❌ *Erro de Comunicação*: {e}", parse_mode="Markdown")
 
     return ConversationHandler.END
@@ -239,9 +269,11 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     if not TELEGRAM_BOT_TOKEN or not REI_DA_PIZZA_API_TOKEN:
+        logger.error("Faltam configurações no arquivo .env")
         print("❌ ERRO: Faltam configurações no arquivo .env")
         return
         
+    logger.info("Iniciando construção da aplicação do bot...")
     application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     
     conv_handler = ConversationHandler(
@@ -268,6 +300,7 @@ def main():
     application.add_handler(CallbackQueryHandler(report_action, pattern="^report_"))
     application.add_handler(CallbackQueryHandler(callback_router, pattern="^back_to_menu$"))
     
+    logger.info("Bot interativo iniciado e aguardando comandos...")
     print("🤖 Bot interativo iniciado e aguardando comandos...")
     application.run_polling()
 
