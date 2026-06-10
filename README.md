@@ -1,84 +1,74 @@
-# 🤖 Ferdinando Monitor Bot
+# 🍕 Bot Financeiro - Rei da Pizza (Telegram)
 
-Seu estagiário de TI no VPS. Monitora processos PM2, gerencia memória, detecta crashes e responde com inteligência artificial (Groq LLaMA).
+Este é o bot do Telegram que se integra à API do **Finance-flow-hub** (Rei da Pizza). Ele permite que administradores autorizados consultem o saldo e registrem novas despesas e receitas diretamente pelo Telegram.
 
 ## 🚀 Deploy no VPS (Linux)
 
-### 1. Clonar e entrar na pasta
+### 1. Clonar o repositório
 ```bash
-git clone <seu-repo> bot_create
-cd bot_create
+git clone https://github.com/FernandoOlm/rei-da-pizza-TL.git
+cd rei-da-pizza-TL
 ```
 
-### 2. Instalar dependências Python
+### 2. Criar ambiente virtual e instalar dependências
+Recomenda-se usar um ambiente virtual (venv) para evitar conflitos de dependências no seu servidor.
 ```bash
-pip3 install -r requirements.txt
+# Criar o ambiente virtual (venv)
+python3 -m venv venv
+
+# Ativar o ambiente virtual
+source venv/bin/activate
+
+# Instalar as bibliotecas necessárias
+pip install -r requirements.txt
 ```
 
 ### 3. Configurar variáveis de ambiente
+Crie o arquivo `.env` baseado no arquivo de exemplo e preencha com as suas chaves.
 ```bash
-cp .env.example .env   # ou edite o .env diretamente
+cp .env.example .env
 nano .env
 ```
 
-> **⚠️ IMPORTANTE:** `OWNER_TELEGRAM_ID` deve ser o seu ID do Telegram.
-> Se não souber, deixe como `0`, inicie o bot e envie qualquer mensagem — ele vai te dizer seu ID.
-
-### 4. Iniciar com PM2
-```bash
-pm2 start ecosystem.config.js
-pm2 save
-pm2 logs monit-bot
-```
-
-### 5. Verificar no Telegram
-Abra o chat com [@Ferdinando_monit_bot](https://t.me/Ferdinando_monit_bot) e envie `/start`
-
----
-
-## 📋 Comandos
-
-| Comando | Descrição |
-|---|---|
-| `/start` | Apresentação e lista de comandos |
-| `/status` | Dashboard: CPU, RAM, disco + todos os processos |
-| `/processos` | Lista detalhada dos processos PM2 |
-| `/memoria` | Análise de memória com alertas e botões de ação |
-| `/logs [nome]` | Últimas 25 linhas de log de um processo |
-| `/restart [nome]` | Reinicia processo (com confirmação) |
-| `/stop [nome]` | Para processo (com confirmação) |
-| `/limpar [nome]` | Limpa logs do processo (com confirmação) |
-| `/analise` | IA analisa todo o VPS e dá recomendações |
-| `/myid` | Retorna seu Telegram ID |
-| `/ajuda` | Lista todos os comandos |
-
----
-
-## 🔔 Alertas Automáticos
-
-O bot monitora proativamente e avisa **sem você precisar perguntar**:
-
-| Alerta | Frequência | Condição |
-|---|---|---|
-| 🚨 Memória alta | 5 min | Processo > 500 MB |
-| 💥 Crash/Erro | 2 min | Status `errored` |
-| 🔥 CPU alta | 5 min | CPU > 85% |
-| ☀️ Relatório diário | Diário (8h) | Sempre |
-
-Todos os alertas incluem **botões de ação** (Limpar / Restart / Analisar com IA / Ignorar).
-
----
-
-## ⚙️ Configuração (.env)
-
+Edite o arquivo `.env` para ficar assim:
 ```env
-TELEGRAM_BOT_TOKEN=...
-GROQ_API_KEY=...
-OWNER_TELEGRAM_ID=SEU_ID_AQUI
-
-MEMORY_ALERT_THRESHOLD_MB=500
-CPU_ALERT_THRESHOLD_PERCENT=85
-MONITOR_INTERVAL_SECONDS=300
-CRASH_CHECK_INTERVAL_SECONDS=120
-DAILY_REPORT_HOUR=8
+TELEGRAM_BOT_TOKEN="O token gerado pelo @BotFather"
+REI_DA_PIZZA_API_TOKEN="O token gerado no painel 'Bots Telegram' do seu sistema web"
+API_BASE_URL="http://IP_DO_SEU_SERVIDOR_WEB:PORTA" # Ex: https://sua-api.com ou http://localhost:5173
 ```
+
+> **⚠️ IMPORTANTE:** Após configurar os tokens, lembre-se de ir até o painel web (Rei da Pizza) na página `/telegram` e **adicionar o seu Telegram ID** como um Usuário Autorizado, concedendo permissões de Leitura e Escrita. Para descobrir seu Telegram ID, envie uma mensagem para `@userinfobot`.
+
+### 4. Rodar o Bot em Background
+Você pode rodar o bot usando o **PM2** (se já o tiver instalado no servidor) para garantir que ele reinicie automaticamente caso o servidor caia.
+
+**Se tiver o PM2 instalado:**
+```bash
+# Iniciar o bot pelo PM2 usando o python do ambiente virtual
+pm2 start ./venv/bin/python --name rei-da-pizza-bot -- main.py
+
+# Salvar o bot na lista de inicialização
+pm2 save
+
+# Ver os logs
+pm2 logs rei-da-pizza-bot
+```
+
+**Se não tiver o PM2 (Usando nohup):**
+```bash
+nohup ./venv/bin/python main.py > bot_output.log 2>&1 &
+```
+
+---
+
+## 📋 Comandos Disponíveis no Telegram
+
+| Comando | Formato | Descrição | Permissão Exigida |
+|---|---|---|---|
+| `/saldo` | `/saldo` | Mostra um resumo do saldo a pagar/receber e os valores atrasados. | **Leitura** |
+| `/pagar` | `/pagar <fornecedor> <valor> <YYYY-MM-DD>` | Lança uma nova conta a pagar pendente. | **Escrita** |
+| `/receber` | `/receber <cliente> <valor> <YYYY-MM-DD>` | Lança uma nova conta a receber pendente. | **Escrita** |
+
+*Exemplos práticos:*
+- `/pagar Mercado 250.50 2026-06-20`
+- `/receber Joao 150.00 2026-06-21`
