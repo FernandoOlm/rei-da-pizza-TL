@@ -27,7 +27,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Estados da conversa
-ASK_NAME, ASK_AMOUNT, ASK_DATE = range(3)
+ASK_NAME, ASK_AMOUNT, ASK_DATE, ASK_CATEGORY, ASK_COST_CENTER = range(5)
 
 def build_headers():
     return {
@@ -214,8 +214,59 @@ async def process_transaction_date(update: Update, context: ContextTypes.DEFAULT
     context.user_data['date'] = vencimento
     
     action_type = context.user_data['action_type']
+    
+    keyboard = [
+        [InlineKeyboardButton("⏭️ Pular Categoria", callback_data="skip_category")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await msg_func("📂 Qual a *Categoria* dessa transação? (ex: Alimentação, Transporte)\n_(Ou clique em pular)_", reply_markup=reply_markup, parse_mode="Markdown")
+    return ASK_CATEGORY
+
+async def ask_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.callback_query:
+        await update.callback_query.answer()
+        context.user_data['category'] = None
+        msg_func = update.callback_query.edit_message_text
+    else:
+        text = update.message.text
+        if text == "/cancelar":
+            await update.message.reply_text("Operação cancelada.")
+            await start_or_menu(update, context)
+            return ConversationHandler.END
+        context.user_data['category'] = text
+        msg_func = update.message.reply_text
+        
+    keyboard = [
+        [InlineKeyboardButton("⏭️ Pular Centro de Custo", callback_data="skip_cost_center")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await msg_func("🏢 Qual o *Centro de Custo*? (ex: Loja 1, Matriz)\n_(Ou clique em pular)_", reply_markup=reply_markup, parse_mode="Markdown")
+    return ASK_COST_CENTER
+
+async def process_transaction_final(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.callback_query:
+        await update.callback_query.answer()
+        context.user_data['cost_center'] = None
+        msg_func = update.callback_query.edit_message_text
+        user_id = update.effective_user.id
+    else:
+        text = update.message.text
+        if text == "/cancelar":
+            await update.message.reply_text("Operação cancelada.")
+            await start_or_menu(update, context)
+            return ConversationHandler.END
+        context.user_data['cost_center'] = text
+        msg_func = update.message.reply_text
+        user_id = update.effective_user.id
+
+    action_type = context.user_data['action_type']
     name = context.user_data['name']
     amount = context.user_data['amount']
+    vencimento = context.user_data['date']
+    category = context.user_data.get('category')
+    cost_center = context.user_data.get('cost_center')
     
     endpoint = "payables" if action_type == "start_payable" else "receivables"
     payload = {
@@ -223,13 +274,21 @@ async def process_transaction_date(update: Update, context: ContextTypes.DEFAULT
         "amount": amount,
         "due_date": vencimento
     }
+    if category:
+        payload["category"] = category
+    if cost_center:
+        payload["cost_center"] = cost_center
+        
+    extra_info = ""
+    if category: extra_info += f"\nCategoria: {category}"
+    if cost_center: extra_info += f"\nCentro de Custo: {cost_center}"
     
     if action_type == "start_payable":
         payload["supplier"] = name
-        success_msg = f"✅ *Despesa registrada!*\nFornecedor: {name}\nValor: R$ {amount:.2f}\nVencimento: {vencimento}"
+        success_msg = f"✅ *Despesa registrada!*\nFornecedor: {name}\nValor: R$ {amount:.2f}\nVencimento: {vencimento}{extra_info}"
     else:
         payload["customer"] = name
-        success_msg = f"✅ *Receita registrada!*\nCliente: {name}\nValor: R$ {amount:.2f}\nVencimento: {vencimento}"
+        success_msg = f"✅ *Receita registrada!*\nCliente: {name}\nValor: R$ {amount:.2f}\nVencimento: {vencimento}{extra_info}"
 
     logger.info(f"Enviando POST para {API_BASE_URL}/api/public/telegram/{endpoint} com payload: {payload}")
 
@@ -286,6 +345,14 @@ def main():
             ASK_DATE: [
                 CallbackQueryHandler(process_transaction_date, pattern=r"^\d{4}-\d{2}-\d{2}$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, process_transaction_date)
+            ],
+            ASK_CATEGORY: [
+                CallbackQueryHandler(ask_category, pattern="^skip_category$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, ask_category)
+            ],
+            ASK_COST_CENTER: [
+                CallbackQueryHandler(process_transaction_final, pattern="^skip_cost_center$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, process_transaction_final)
             ],
         },
         fallbacks=[CommandHandler("cancelar", cancel)]
