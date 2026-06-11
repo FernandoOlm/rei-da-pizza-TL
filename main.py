@@ -254,34 +254,33 @@ async def process_transaction_date(update: Update, context: ContextTypes.DEFAULT
     keyboard = []
     
     try:
-        cat_resp = requests.get(
-            f"{API_BASE_URL}/api/public/telegram/categories",
-            headers=build_headers(),
-            params={"telegram_user_id": user_id}
-        )
-        if cat_resp.ok:
-            categories = cat_resp.json().get("data", [])
-            action_type = context.user_data.get('action_type')
-            expected_type = "despesa" if action_type == "start_payable" else "receita"
-            
-            # Organiza 2 botões por linha
-            row = []
-            for cat in categories:
-                # Se a API retornar o campo 'type', filtra de acordo com a transação
-                if cat.get("type") and cat.get("type") != expected_type:
-                    continue
+        # Extraímos das transações históricas já que não temos rota dedicada
+        params = {"telegram_user_id": user_id, "limit": 1000}
+        payables_resp = requests.get(f"{API_BASE_URL}/api/public/telegram/payables", headers=build_headers(), params=params)
+        receivables_resp = requests.get(f"{API_BASE_URL}/api/public/telegram/receivables", headers=build_headers(), params=params)
+        
+        categories = set()
+        action_type = context.user_data.get('action_type')
+        
+        # Se for pagar, pega as categorias de despesas antigas. Se for receber, pega de receitas antigas.
+        if action_type == "start_payable" and payables_resp.ok:
+            for item in payables_resp.json().get("data", []):
+                if item.get("category"):
+                    categories.add(item.get("category"))
+        elif action_type == "start_receivable" and receivables_resp.ok:
+            for item in receivables_resp.json().get("data", []):
+                if item.get("category"):
+                    categories.add(item.get("category"))
                     
-                cat_name = cat.get("name")
-                if cat_name:
-                    # Usamos um prefixo 'cat_' e truncamos para caber no callback_data
-                    row.append(InlineKeyboardButton(cat_name, callback_data=f"cat_{cat_name[:40]}"))
-                    if len(row) == 2:
-                        keyboard.append(row)
-                        row = []
+        if categories:
+            row = []
+            for cat_name in sorted(list(categories)):
+                row.append(InlineKeyboardButton(cat_name, callback_data=f"cat_{cat_name[:40]}"))
+                if len(row) == 2:
+                    keyboard.append(row)
+                    row = []
             if row:
                 keyboard.append(row)
-        else:
-            logger.warning(f"Erro ao buscar categorias: HTTP {cat_resp.status_code}")
     except Exception as e:
         logger.warning(f"Erro ao buscar categorias: {e}")
 
@@ -314,21 +313,27 @@ async def ask_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = []
     
     try:
-        cc_resp = requests.get(
-            f"{API_BASE_URL}/api/public/telegram/cost_centers",
-            headers=build_headers(),
-            params={"telegram_user_id": user_id}
-        )
-        if cc_resp.ok:
-            cost_centers = cc_resp.json().get("data", [])
+        params = {"telegram_user_id": user_id, "limit": 1000}
+        payables_resp = requests.get(f"{API_BASE_URL}/api/public/telegram/payables", headers=build_headers(), params=params)
+        receivables_resp = requests.get(f"{API_BASE_URL}/api/public/telegram/receivables", headers=build_headers(), params=params)
+        
+        cost_centers = set()
+        if payables_resp.ok:
+            for item in payables_resp.json().get("data", []):
+                if item.get("cost_center"):
+                    cost_centers.add(item.get("cost_center"))
+        if receivables_resp.ok:
+            for item in receivables_resp.json().get("data", []):
+                if item.get("cost_center"):
+                    cost_centers.add(item.get("cost_center"))
+                    
+        if cost_centers:
             row = []
-            for cc in cost_centers:
-                cc_name = cc.get("name")
-                if cc_name:
-                    row.append(InlineKeyboardButton(cc_name, callback_data=f"cc_{cc_name[:40]}"))
-                    if len(row) == 2:
-                        keyboard.append(row)
-                        row = []
+            for cc_name in sorted(list(cost_centers)):
+                row.append(InlineKeyboardButton(cc_name, callback_data=f"cc_{cc_name[:40]}"))
+                if len(row) == 2:
+                    keyboard.append(row)
+                    row = []
             if row:
                 keyboard.append(row)
     except Exception as e:
