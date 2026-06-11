@@ -1,6 +1,7 @@
 import os
 import logging
 import requests
+import re
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -221,7 +222,7 @@ async def ask_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await update.message.reply_text("📅 Selecione a *data de vencimento* nos botões abaixo ou digite no formato AAAA-MM-DD:", reply_markup=reply_markup, parse_mode="Markdown")
+        await update.message.reply_text("📅 Selecione a *data de vencimento* nos botões abaixo ou digite (Ex: 25/06/2026):", reply_markup=reply_markup, parse_mode="Markdown")
         return ASK_DATE
     except Exception as e:
         import traceback
@@ -238,12 +239,23 @@ async def process_transaction_date(update: Update, context: ContextTypes.DEFAULT
         user_id = update.effective_user.id
         msg_func = update.callback_query.edit_message_text
     else:
-        text = update.message.text
+        text = update.message.text.strip()
         if text == "/cancelar":
             await update.message.reply_text("Operação cancelada.")
             await start_or_menu(update, context)
             return ConversationHandler.END
-        vencimento = text
+            
+        match = re.match(r"^(\d{2})[/\.](\d{2})[/\.](\d{2,4})$", text)
+        if match:
+            day, month, year = match.groups()
+            if len(year) == 2:
+                year = f"20{year}"
+            vencimento = f"{year}-{month}-{day}"
+        elif re.match(r"^\d{4}-\d{2}-\d{2}$", text):
+            vencimento = text
+        else:
+            await update.message.reply_text("❌ Data inválida. Por favor, use o formato DD/MM/AAAA (ex: 25/06/2026).")
+            return ASK_DATE
         user_id = update.effective_user.id
         msg_func = update.message.reply_text
     
