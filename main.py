@@ -84,45 +84,80 @@ async def report_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action = query.data
     user_id = update.effective_user.id
     
-    if action == "report_summary":
-        logger.info(f"Usuário {user_id} solicitou Resumo Geral. Fazendo GET para {API_BASE_URL}/api/public/telegram/summary")
-        try:
-            response = requests.get(
-                f"{API_BASE_URL}/api/public/telegram/summary",
-                headers=build_headers(),
-                params={"telegram_user_id": user_id}
-            )
-            logger.info(f"API retornou status {response.status_code} para Resumo Geral.")
+    # Mapear a ação para o período
+    period = "month"
+    if action == "report_week":
+        period = "week"
+    elif action == "report_summary":
+        period = "custom"
+        
+    logger.info(f"Usuário {user_id} solicitou relatório: {action}. Fazendo GET para summary com period={period}")
+    try:
+        params = {"telegram_user_id": user_id, "period": period}
+        if period == "custom":
+            params["start_date"] = "2000-01-01"
+            params["end_date"] = "2100-01-01"
             
-            if not response.ok:
-                err_text = response.text[:200]
-                logger.error(f"Erro na API (Resumo Geral): {err_text}")
-                await query.edit_message_text(f"❌ Erro API ({response.status_code}): {err_text}")
-                return
-                
-            data = response.json()["data"]
-            msg = (
-                f"📊 *Resumo Geral (Em Aberto)*\n\n"
-                f"🔴 A Pagar: R$ {data['total_payable_pending']:.2f} "
-                f"(Atrasado: R$ {data['overdue_payable']:.2f})\n"
-                f"🟢 A Receber: R$ {data['total_receivable_pending']:.2f} "
-                f"(Atrasado: R$ {data['overdue_receivable']:.2f})"
-            )
-            keyboard = [[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="back_to_menu")]]
-            await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-        except Exception as e:
-            logger.error(f"Falha de comunicação no Resumo Geral: {e}", exc_info=True)
-            await query.edit_message_text(f"❌ Falha de comunicação: {e}")
-            
-    elif action in ["report_month", "report_week"]:
-        logger.info(f"Usuário {user_id} clicou em relatório indisponível: {action}")
-        msg = (
-            "🚧 *Recurso em Construção no Lovable*\n\n"
-            "Atualmente, a API suporta apenas o Resumo Geral de tudo que está pendente.\n"
-            "Um endpoint para Fluxo de Caixa Mensal/Semanal precisa ser criado no seu painel web."
+        response = requests.get(
+            f"{API_BASE_URL}/api/public/telegram/summary",
+            headers=build_headers(),
+            params=params
         )
+        logger.info(f"API retornou status {response.status_code} para {action}.")
+        
+        if not response.ok:
+            err_text = response.text[:200]
+            logger.error(f"Erro na API ({action}): {err_text}")
+            await query.edit_message_text(f"❌ Erro API ({response.status_code}): {err_text}")
+            return
+            
+        data = response.json()["data"]
+        
+        start_date = data.get("start_date", "")
+        end_date = data.get("end_date", "")
+        
+        # Formatar datas para exibição (YYYY-MM-DD -> DD/MM/YYYY)
+        def fmt_date(d_str):
+            if len(d_str) == 10:
+                parts = d_str.split('-')
+                return f"{parts[2]}/{parts[1]}/{parts[0]}"
+            return d_str
+            
+        if action == "report_summary":
+            title = "📊 *Resumo Geral (Todo o período)*"
+            date_str = ""
+        elif action == "report_month":
+            title = "📊 *Resumo do Mês*"
+            date_str = f"_{fmt_date(start_date)} a {fmt_date(end_date)}_\n\n"
+        else:
+            title = "📊 *Resumo da Semana*"
+            date_str = f"_{fmt_date(start_date)} a {fmt_date(end_date)}_\n\n"
+            
+        total_paid = data.get('total_paid', 0)
+        total_received = data.get('total_received', 0)
+        balance = data.get('balance', 0)
+        pending_payables = data.get('pending_payables', 0)
+        pending_receivables = data.get('pending_receivables', 0)
+        
+        msg = f"{title}\n{date_str}"
+        
+        if action in ["report_month", "report_week"]:
+            msg += (
+                f"🟢 *Recebido*: R$ {total_received:.2f}\n"
+                f"🔴 *Pago*: R$ {total_paid:.2f}\n"
+                f"💰 *Saldo do Período*: R$ {balance:.2f}\n\n"
+            )
+            
+        msg += (
+            f"⏳ *Pendente a Receber*: R$ {pending_receivables:.2f}\n"
+            f"⏳ *Pendente a Pagar*: R$ {pending_payables:.2f}"
+        )
+
         keyboard = [[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="back_to_menu")]]
         await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Falha de comunicação no {action}: {e}", exc_info=True)
+        await query.edit_message_text(f"❌ Falha de comunicação: {e}")
 
 # --- FLUXO DE CONVERSA: PAGAR / RECEBER ---
 async def start_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -226,9 +261,16 @@ async def process_transaction_date(update: Update, context: ContextTypes.DEFAULT
         )
         if cat_resp.ok:
             categories = cat_resp.json().get("data", [])
+            action_type = context.user_data.get('action_type')
+            expected_type = "despesa" if action_type == "start_payable" else "receita"
+            
             # Organiza 2 botões por linha
             row = []
             for cat in categories:
+                # Se a API retornar o campo 'type', filtra de acordo com a transação
+                if cat.get("type") and cat.get("type") != expected_type:
+                    continue
+                    
                 cat_name = cat.get("name")
                 if cat_name:
                     # Usamos um prefixo 'cat_' e truncamos para caber no callback_data
@@ -238,6 +280,8 @@ async def process_transaction_date(update: Update, context: ContextTypes.DEFAULT
                         row = []
             if row:
                 keyboard.append(row)
+        else:
+            logger.warning(f"Erro ao buscar categorias: HTTP {cat_resp.status_code}")
     except Exception as e:
         logger.warning(f"Erro ao buscar categorias: {e}")
 
