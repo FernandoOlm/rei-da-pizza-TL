@@ -219,27 +219,34 @@ async def process_transaction_date(update: Update, context: ContextTypes.DEFAULT
     keyboard = []
     
     try:
-        cat_resp = requests.get(
-            f"{API_BASE_URL}/api/public/telegram/categories",
-            headers=build_headers(),
-            params={"telegram_user_id": user_id}
-        )
-        if cat_resp.ok:
-            categories = cat_resp.json().get("data", [])
-            # Organiza 2 botões por linha
+        headers = build_headers()
+        params = {"telegram_user_id": user_id, "limit": 30}
+        
+        # Como a API não tem rota /categories, extraímos das últimas transações
+        payables_resp = requests.get(f"{API_BASE_URL}/api/public/telegram/payables", headers=headers, params=params)
+        receivables_resp = requests.get(f"{API_BASE_URL}/api/public/telegram/receivables", headers=headers, params=params)
+        
+        categories = set()
+        if payables_resp.ok:
+            for item in payables_resp.json().get("data", []):
+                if item.get("category"):
+                    categories.add(item.get("category"))
+        if receivables_resp.ok:
+            for item in receivables_resp.json().get("data", []):
+                if item.get("category"):
+                    categories.add(item.get("category"))
+                    
+        if categories:
             row = []
-            for cat in categories:
-                cat_name = cat.get("name")
-                if cat_name:
-                    # Usamos um prefixo 'cat_' e truncamos para caber no callback_data
-                    row.append(InlineKeyboardButton(cat_name, callback_data=f"cat_{cat_name[:40]}"))
-                    if len(row) == 2:
-                        keyboard.append(row)
-                        row = []
+            for cat_name in sorted(list(categories)):
+                row.append(InlineKeyboardButton(cat_name, callback_data=f"cat_{cat_name[:40]}"))
+                if len(row) == 2:
+                    keyboard.append(row)
+                    row = []
             if row:
                 keyboard.append(row)
     except Exception as e:
-        logger.warning(f"Erro ao buscar categorias: {e}")
+        logger.warning(f"Erro ao buscar categorias nas transações: {e}")
 
     keyboard.append([InlineKeyboardButton("⏭️ Pular Categoria", callback_data="skip_category")])
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -270,25 +277,34 @@ async def ask_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = []
     
     try:
-        cc_resp = requests.get(
-            f"{API_BASE_URL}/api/public/telegram/cost_centers",
-            headers=build_headers(),
-            params={"telegram_user_id": user_id}
-        )
-        if cc_resp.ok:
-            cost_centers = cc_resp.json().get("data", [])
+        headers = build_headers()
+        params = {"telegram_user_id": user_id, "limit": 30}
+        
+        # Como a API não tem rota /cost_centers, extraímos das últimas transações
+        payables_resp = requests.get(f"{API_BASE_URL}/api/public/telegram/payables", headers=headers, params=params)
+        receivables_resp = requests.get(f"{API_BASE_URL}/api/public/telegram/receivables", headers=headers, params=params)
+        
+        cost_centers = set()
+        if payables_resp.ok:
+            for item in payables_resp.json().get("data", []):
+                if item.get("cost_center"):
+                    cost_centers.add(item.get("cost_center"))
+        if receivables_resp.ok:
+            for item in receivables_resp.json().get("data", []):
+                if item.get("cost_center"):
+                    cost_centers.add(item.get("cost_center"))
+                    
+        if cost_centers:
             row = []
-            for cc in cost_centers:
-                cc_name = cc.get("name")
-                if cc_name:
-                    row.append(InlineKeyboardButton(cc_name, callback_data=f"cc_{cc_name[:40]}"))
-                    if len(row) == 2:
-                        keyboard.append(row)
-                        row = []
+            for cc_name in sorted(list(cost_centers)):
+                row.append(InlineKeyboardButton(cc_name, callback_data=f"cc_{cc_name[:40]}"))
+                if len(row) == 2:
+                    keyboard.append(row)
+                    row = []
             if row:
                 keyboard.append(row)
     except Exception as e:
-        logger.warning(f"Erro ao buscar centros de custo: {e}")
+        logger.warning(f"Erro ao buscar centros de custo nas transações: {e}")
 
     keyboard.append([InlineKeyboardButton("⏭️ Pular Centro de Custo", callback_data="skip_cost_center")])
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -356,8 +372,16 @@ async def process_transaction_final(update: Update, context: ContextTypes.DEFAUL
         logger.info(f"API retornou status {response.status_code} para registro de transação.")
         
         if response.ok:
+            data = response.json().get("data", {})
+            warnings = ""
+            if category and data.get("category_id") is None:
+                warnings += f"\n\n⚠️ *Aviso*: A categoria '{category}' não existe no sistema e foi ignorada (ficou vazia)."
+            if cost_center and data.get("cost_center_id") is None:
+                warnings += f"\n\n⚠️ *Aviso*: O centro de custo '{cost_center}' não existe no sistema e foi ignorado (ficou vazio)."
+                
+            final_msg = success_msg + warnings
             keyboard = [[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="back_to_menu")]]
-            await msg_func(success_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+            await msg_func(final_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
             logger.info("Transação finalizada com sucesso.")
         else:
             err = response.text[:200]
