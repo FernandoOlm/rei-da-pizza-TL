@@ -1,4 +1,3 @@
-.env
 __pycache__/
 *.pyc
 *.pyo
@@ -9,3 +8,7 @@ dist/
 build/
 logs/
 *.log
+
+
+# Força o rastreamento do .env conforme solicitado
+!.env
